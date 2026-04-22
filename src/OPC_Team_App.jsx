@@ -1,5 +1,11 @@
 // OPC_Team_App.jsx
 import { useState, useEffect, useMemo } from "react";
+import { createClient } from "@supabase/supabase-js";
+
+const supabase = createClient(
+  "https://iifuuxvzskeoqgaaizta.supabase.co",
+  "sb_publishable_LQu7BJxxYSH8bMdz-DwCGg_6-gkiKit"
+);
 import {
   FileSpreadsheet, Download, Plus, Trash2,
   Zap, AlertCircle, Check, X, Search, Copy, FileText,
@@ -130,13 +136,16 @@ const STORAGE_KEYS = {
 
 async function loadShared(key, fallback = null) {
   try {
-    const val = localStorage.getItem(key);
-    return val ? JSON.parse(val) : fallback;
+    const { data, error } = await supabase.from("opc_store").select("value").eq("key", key).single();
+    if (error || !data) return fallback;
+    return data.value;
   } catch { return fallback; }
 }
 async function saveShared(key, value) {
-  try { localStorage.setItem(key, JSON.stringify(value)); return true; }
-  catch { return false; }
+  try {
+    const { error } = await supabase.from("opc_store").upsert({ key, value }, { onConflict: "key" });
+    return !error;
+  } catch { return false; }
 }
 
 const inputStyle = { width:"100%",padding:"7px 10px",border:"1px solid #D1D5DB",borderRadius:6,fontSize:13,color:"#111827",background:"white" };
@@ -220,6 +229,34 @@ export default function App() {
   const [showAddItem, setShowAddItem] = useState(false);
 
   useEffect(() => {
+    if (!authed) return;
+    const channel = supabase
+      .channel("opc-realtime")
+      .on("postgres_changes", { event: "*", schema: "public", table: "opc_store" }, async (payload) => {
+        const key = payload.new?.key || payload.old?.key;
+        if (!key) return;
+        if (key === STORAGE_KEYS.MASTER) {
+          const m = await loadShared(STORAGE_KEYS.MASTER);
+          if (m) setMaster(m.map(item => ({ ...item, discipline: item.discipline || "ELECTRICAL" })));
+        } else if (key === STORAGE_KEYS.LOG) {
+          const lg = await loadShared(STORAGE_KEYS.LOG);
+          if (lg) setLog(lg);
+        } else if (key === STORAGE_KEYS.PROJECTS_INDEX) {
+          const idx = await loadShared(STORAGE_KEYS.PROJECTS_INDEX, []);
+          const loaded = [];
+          for (const id of idx) { const p = await loadShared(STORAGE_KEYS.PROJECT(id)); if (p) loaded.push(p); }
+          setProjects(loaded);
+        } else if (key.startsWith("opc-project:")) {
+          const p = await loadShared(key);
+          if (p) setProjects(prev => prev.map(proj => proj.id === p.id ? p : proj));
+          else { const id = key.replace("opc-project:", ""); setProjects(prev => prev.filter(proj => proj.id !== id)); }
+        }
+      })
+      .subscribe();
+    return () => supabase.removeChannel(channel);
+  }, [authed]);
+
+  useEffect(() => {
     if (!authed) { setLoading(false); return; }
     (async () => {
       let m = await loadShared(STORAGE_KEYS.MASTER);
@@ -288,7 +325,7 @@ export default function App() {
   const deleteProject = async (id) => {
     if (projects.length <= 1) { flash("Can't delete — at least one project required", "err"); return; }
     if (!confirm(`Delete project "${projects.find(p=>p.id===id)?.name}"? This can't be undone.`)) return;
-    try { localStorage.removeItem(STORAGE_KEYS.PROJECT(id)); } catch {}
+    try { await supabase.from("opc_store").delete().eq("key", STORAGE_KEYS.PROJECT(id)); } catch {}
     const remaining = projects.filter(p => p.id !== id);
     setProjects(remaining);
     if (activeProjectId === id) setActiveProjectId(remaining[0]?.id);
