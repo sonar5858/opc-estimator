@@ -657,7 +657,7 @@ function DisciplineSection({ disc, discMeta, discData, activeProject, setQty }) 
                     <td style={tdStyle}>{row.desc}{row.note&&<div style={{ fontSize:11,color:"#9CA3AF",marginTop:2 }}>{row.note}</div>}</td>
                     <td style={{ ...tdStyle,textAlign:"center",color:"#6B7280",fontSize:12 }}>{row.unit}</td>
                     <td style={{ ...tdStyle,textAlign:"right" }}>
-                      <input type="number" min="0" step="0.1" value={row.qty||""} placeholder="0" onChange={e => setQty(row.id,e.target.value===""?0:Number(e.target.value))} className="qty-input"/>
+                      <input type="number" min="0" step="1" value={row.qty||""} placeholder="0" onChange={e => setQty(row.id,e.target.value===""?0:Number(e.target.value))} className="qty-input"/>
                     </td>
                     <td style={{ ...tdStyle,textAlign:"right",color:"#6B7280",fontVariantNumeric:"tabular-nums" }}>{fmtCurrency(row.unitParts)}</td>
                     <td style={{ ...tdStyle,textAlign:"right",color:"#6B7280",fontVariantNumeric:"tabular-nums" }}>{fmtCurrency(row.unitLabour)}</td>
