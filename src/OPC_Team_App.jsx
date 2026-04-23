@@ -296,7 +296,21 @@ export default function App() {
   const activeProject = projects.find(p => p.id === activeProjectId);
   const flash = (msg, kind = "ok") => { setToast({ msg, kind }); setTimeout(() => setToast(null), 2500); };
 
+  const snapshotPrices = (masterList) => {
+    const snap = {};
+    masterList.forEach(item => { snap[item.id] = { parts: item.parts, labour: item.labour }; });
+    return snap;
+  };
+
   const updateProject = async (id, patch) => {
+    const existing = projects.find(p => p.id === id);
+    const newStatus = patch.status || existing?.status;
+    const wasLocked = ["Approved","Issued"].includes(existing?.status);
+    const nowLocked = ["Approved","Issued"].includes(newStatus);
+    // take snapshot when project first moves to Approved or Issued
+    if (!wasLocked && nowLocked && !existing?.priceSnapshot) {
+      patch = { ...patch, priceSnapshot: snapshotPrices(master) };
+    }
     const updated = projects.map(p => p.id === id ? { ...p, ...patch, updated: Date.now() } : p);
     setProjects(updated);
     await saveShared(STORAGE_KEYS.PROJECT(id), updated.find(x => x.id === id));
@@ -369,6 +383,22 @@ export default function App() {
     await saveMaster([...master, newItem]);
     await addLogEntry("New Item", `Added "${item.desc}" to ${DISCIPLINE_META[item.discipline]?.label} / ${SECTION_META[item.section]?.label}`);
     flash("Item added to master list");
+  };
+
+  const acceptNewPrice = async (itemId) => {
+    if (!activeProject) return;
+    const item = master.find(x => x.id === itemId);
+    const snap = { ...activeProject.priceSnapshot, [itemId]: { parts: item?.parts, labour: item?.labour, acknowledged: true } };
+    await updateProject(activeProject.id, { priceSnapshot: snap });
+    flash("Price accepted and snapshot updated");
+  };
+
+  const dismissPriceChange = async (itemId) => {
+    if (!activeProject) return;
+    const item = master.find(x => x.id === itemId);
+    const snap = { ...activeProject.priceSnapshot, [itemId]: { parts: item?.parts, labour: item?.labour, acknowledged: true } };
+    await updateProject(activeProject.id, { priceSnapshot: snap });
+    flash("Price change dismissed");
   };
 
   const removeMasterItem = async (id) => {
@@ -455,7 +485,7 @@ export default function App() {
       sectionHTML += `<tr><td colspan="5" style="text-align:right;font-weight:600;background:#F3F4F6">${discMeta.label} Subtotal</td><td style="text-align:right;font-weight:600;background:#F3F4F6">${fmtCurrency(subtotal)}</td></tr>`;
       sectionHTML += `<tr><td colspan="5" style="text-align:right;font-weight:600;background:#FEF3C7">+ ${(activeProject.contingency*100).toFixed(0)}% Contingency</td><td style="text-align:right;font-weight:600;background:#FEF3C7">${fmtCurrency(withContingency)}</td></tr>`;
     }
-    win.document.write(`<html><head><title>OPC — ${activeProject.name}</title><style>@page{size:letter;margin:0.5in}body{font-family:Georgia,serif;color:#1F2937;padding:20px;max-width:850px;margin:0 auto}h1{font-size:22px;border-bottom:3px solid #1F4E78;padding-bottom:10px;margin-bottom:6px}.subtitle{color:#6B7280;font-size:13px;margin-bottom:20px}.info{display:grid;grid-template-columns:repeat(3,1fr);gap:6px 20px;margin-bottom:20px;font-size:13px}.info strong{color:#1F4E78}table{width:100%;border-collapse:collapse;font-size:11px}th{background:#1F4E78;color:white;padding:8px;text-align:left}td{padding:5px 8px;border-bottom:1px solid #E5E7EB}.grand-total{margin-top:20px;text-align:right;font-size:18px;font-weight:700;color:#C00000;padding:12px;border-top:3px solid #C00000}.footer{margin-top:40px;font-size:10px;color:#9CA3AF;text-align:center;border-top:1px solid #E5E7EB;padding-top:10px}</style></head><body><h1>Opinion of Probable Cost</h1><div class="subtitle">${activeProject.name}</div><div class="info"><div><strong>Project No.:</strong> ${activeProject.projectNo||"—"}</div><div><strong>Date:</strong> ${activeProject.date}</div><div><strong>Engineer:</strong> ${activeProject.engineer||"—"}</div><div><strong>Revision:</strong> ${activeProject.rev}</div><div><strong>Status:</strong> ${activeProject.status||"Draft"}</div></div><table><thead><tr><th>Item</th><th style="text-align:center">Unit</th><th style="text-align:right">Qty</th><th style="text-align:right">Unit Parts</th><th style="text-align:right">Unit Labour</th><th style="text-align:right">Total</th></tr></thead><tbody>${sectionHTML}</tbody></table><div class="grand-total">GRAND TOTAL (incl. ${(activeProject.contingency*100).toFixed(0)}% contingency): ${fmtCurrency(projectCalc.grandTotal)}</div><div class="footer">Generated ${new Date().toLocaleDateString()} · OPC Web App</div><script>window.onload=()=>setTimeout(()=>window.print(),800)<\/script></body></html>`);
+    win.document.write(`<html><head><title>OPC — ${activeProject.name}</title><style>@page{size:letter;margin:0.5in}body{font-family:Georgia,serif;color:#1F2937;padding:20px;max-width:850px;margin:0 auto}h1{font-size:22px;border-bottom:3px solid #1F4E78;padding-bottom:10px;margin-bottom:6px}.subtitle{color:#6B7280;font-size:13px;margin-bottom:20px}.info{display:grid;grid-template-columns:repeat(3,1fr);gap:6px 20px;margin-bottom:20px;font-size:13px}.info strong{color:#1F4E78}table{width:100%;border-collapse:collapse;font-size:11px}th{background:#1F4E78;color:white;padding:8px;text-align:left}td{padding:5px 8px;border-bottom:1px solid #E5E7EB}.grand-total{margin-top:20px;text-align:right;font-size:18px;font-weight:700;color:#C00000;padding:12px;border-top:3px solid #C00000}.footer{margin-top:40px;font-size:10px;color:#9CA3AF;text-align:center;border-top:1px solid #E5E7EB;padding-top:10px}</style></head><body><h1>Opinion of Probable Cost</h1><div class="subtitle">${activeProject.name}</div><div class="info"><div><strong>Project No.:</strong> ${activeProject.projectNo||"—"}</div><div><strong>Date:</strong> ${activeProject.date}</div><div><strong>Engineer:</strong> ${activeProject.engineer||"—"}</div><div><strong>Revision:</strong> ${activeProject.rev}</div><div><strong>Status:</strong> ${activeProject.status||"Draft"}</div></div><table><thead><tr><th>Item</th><th style="text-align:center">Unit</th><th style="text-align:right">Qty</th><th style="text-align:right">Unit Parts</th><th style="text-align:right">Unit Labour</th><th style="text-align:right">Total</th></tr></thead><tbody>${sectionHTML}</tbody></table><div class="grand-total">GRAND TOTAL (incl. ${(activeProject.contingency*100).toFixed(0)}% contingency): ${fmtCurrency(projectCalc.grandTotal)}</div><div class="footer">Generated ${new Date().toLocaleDateString()} · OPC Web App · Yash Sonar, EIT</div><script>window.onload=()=>setTimeout(()=>window.print(),800)<\/script></body></html>`);
     win.document.close();
     flash("Opening print dialog...");
   };
@@ -519,7 +549,7 @@ export default function App() {
       </div>
 
       <div style={{ padding:24 }}>
-        {tab==="project" && <ProjectView projects={projects} activeProject={activeProject} activeProjectId={activeProjectId} setActiveProjectId={setActiveProjectId} updateProject={updateProject} setQty={setQty} projectCalc={projectCalc} deleteProject={deleteProject} duplicateProject={duplicateProject} exportCSV={exportCSV} exportPDF={exportPDF} showNewProject={showNewProject} setShowNewProject={setShowNewProject} createProject={createProject}/>}
+        {tab==="project" && <ProjectView projects={projects} activeProject={activeProject} activeProjectId={activeProjectId} setActiveProjectId={setActiveProjectId} updateProject={updateProject} setQty={setQty} projectCalc={projectCalc} deleteProject={deleteProject} duplicateProject={duplicateProject} exportCSV={exportCSV} exportPDF={exportPDF} showNewProject={showNewProject} setShowNewProject={setShowNewProject} createProject={createProject} master={master} acceptNewPrice={acceptNewPrice} dismissPriceChange={dismissPriceChange}/>}
         {tab==="master" && <MasterView master={filteredMaster} query={query} setQuery={setQuery} discFilter={discFilter} setDiscFilter={setDiscFilter} updateMasterItem={updateMasterItem} removeMasterItem={removeMasterItem} showAddItem={showAddItem} setShowAddItem={setShowAddItem} addMasterItem={addMasterItem} editingMaster={editingMaster} setEditingMaster={setEditingMaster}/>}
         {tab==="log" && <LogView log={log}/>}
         {tab==="help" && <HelpView/>}
@@ -530,6 +560,9 @@ export default function App() {
           {toast.kind==="err"?<AlertCircle size={16}/>:<Check size={16}/>}{toast.msg}
         </div>
       )}
+      <div style={{ textAlign:"center",padding:"16px 24px",fontSize:12,color:"#9CA3AF",borderTop:"1px solid #E5E7EB",marginTop:8 }}>
+        Developed by <span style={{ fontWeight:600,color:"#6B7280" }}>Yash Sonar, EIT</span>
+      </div>
     </div>
   );
 }
@@ -537,7 +570,7 @@ export default function App() {
 // ============================================================
 // PROJECT VIEW
 // ============================================================
-function ProjectView({ projects, activeProject, activeProjectId, setActiveProjectId, updateProject, setQty, projectCalc, deleteProject, duplicateProject, exportCSV, exportPDF, showNewProject, setShowNewProject, createProject }) {
+function ProjectView({ projects, activeProject, activeProjectId, setActiveProjectId, updateProject, setQty, projectCalc, deleteProject, duplicateProject, exportCSV, exportPDF, showNewProject, setShowNewProject, createProject, master, acceptNewPrice, dismissPriceChange }) {
   if (!activeProject || !projectCalc) return null;
   return (
     <div style={{ display:"grid",gridTemplateColumns:"240px 1fr",gap:20 }}>
@@ -585,6 +618,16 @@ function ProjectView({ projects, activeProject, activeProjectId, setActiveProjec
             <button className="btn" onClick={() => duplicateProject(activeProject.id)}><Copy size={14}/> Duplicate</button>
             <button className="btn btn-danger" onClick={() => deleteProject(activeProject.id)}><Trash2 size={14}/> Delete</button>
           </div>
+          {["Approved","Issued"].includes(activeProject.status) && (() => {
+            const snap = activeProject.priceSnapshot || {};
+            const hasUnack = master.some(item => snap[item.id] && !snap[item.id].acknowledged && (snap[item.id].parts !== item.parts || snap[item.id].labour !== item.labour));
+            return hasUnack ? (
+              <div style={{ display:"flex",alignItems:"flex-start",gap:8,marginTop:14,background:"#FEF3C7",border:"1px solid #FDE68A",borderRadius:6,padding:"10px 14px",fontSize:12,color:"#92400E" }}>
+                <AlertCircle size={14} style={{ flexShrink:0,marginTop:1 }}/>
+                <span>This project is <b>{activeProject.status}</b> — some line items have received price updates. Review highlighted items below before re-issuing.</span>
+              </div>
+            ) : null;
+          })()}
         </div>
 
         <div style={{ background:"linear-gradient(135deg,#1F4E78,#2E75B6)",color:"white",padding:"18px 24px",borderRadius:8,marginBottom:16,display:"flex",alignItems:"center",justifyContent:"space-between" }}>
@@ -609,7 +652,7 @@ function ProjectView({ projects, activeProject, activeProjectId, setActiveProjec
         </div>
 
         {Object.entries(DISCIPLINE_META).map(([disc, discMeta]) => (
-          <DisciplineSection key={disc} disc={disc} discMeta={discMeta} discData={projectCalc.byDiscipline[disc]} activeProject={activeProject} setQty={setQty}/>
+          <DisciplineSection key={disc} disc={disc} discMeta={discMeta} discData={projectCalc.byDiscipline[disc]} activeProject={activeProject} setQty={setQty} master={master} acceptNewPrice={acceptNewPrice} dismissPriceChange={dismissPriceChange}/>
         ))}
       </div>
 
@@ -618,7 +661,16 @@ function ProjectView({ projects, activeProject, activeProjectId, setActiveProjec
   );
 }
 
-function DisciplineSection({ disc, discMeta, discData, activeProject, setQty }) {
+function DisciplineSection({ disc, discMeta, discData, activeProject, setQty, master, acceptNewPrice, dismissPriceChange }) {
+  const isLocked = ["Approved","Issued"].includes(activeProject.status);
+  const snap = activeProject.priceSnapshot || {};
+  const hasPriceChange = (itemId) => {
+    if (!isLocked || !snap[itemId]) return false;
+    if (snap[itemId].acknowledged) return false;
+    const item = master.find(x => x.id === itemId);
+    if (!item) return false;
+    return snap[itemId].parts !== item.parts || snap[itemId].labour !== item.labour;
+  };
   const allRows = Object.values(discData.bySection).flatMap(s => s.rows);
   const [collapsed, setCollapsed] = useState(discData.subtotal === 0);
   if (allRows.length === 0) return null;
@@ -654,7 +706,22 @@ function DisciplineSection({ disc, discMeta, discData, activeProject, setQty }) 
               <tbody>
                 {rows.map(row => (
                   <tr key={row.id} style={{ borderBottom:"1px solid #F3F4F6",opacity:row.qty>0?1:0.55 }}>
-                    <td style={tdStyle}>{row.desc}{row.note&&<div style={{ fontSize:11,color:"#9CA3AF",marginTop:2 }}>{row.note}</div>}</td>
+                    <td style={tdStyle}>
+                      <div style={{ display:"flex",alignItems:"flex-start",gap:8 }}>
+                        <div>
+                          {row.desc}
+                          {row.note&&<div style={{ fontSize:11,color:"#9CA3AF",marginTop:2 }}>{row.note}</div>}
+                        </div>
+                        {hasPriceChange(row.id) && (
+                          <div style={{ flexShrink:0,display:"flex",alignItems:"center",gap:4,background:"#FEF3C7",border:"1px solid #FDE68A",borderRadius:6,padding:"3px 8px",fontSize:11,color:"#92400E" }}>
+                            <AlertCircle size={11}/>
+                            <span>Price changed: ${snap[row.id].parts} → ${master.find(x=>x.id===row.id)?.parts}</span>
+                            <button onClick={() => acceptNewPrice(row.id)} style={{ marginLeft:4,background:"#10B981",color:"white",border:"none",borderRadius:4,padding:"1px 6px",fontSize:10,cursor:"pointer",fontFamily:"inherit" }}>Accept</button>
+                            <button onClick={() => dismissPriceChange(row.id)} style={{ background:"#6B7280",color:"white",border:"none",borderRadius:4,padding:"1px 6px",fontSize:10,cursor:"pointer",fontFamily:"inherit" }}>Dismiss</button>
+                          </div>
+                        )}
+                      </div>
+                    </td>
                     <td style={{ ...tdStyle,textAlign:"center",color:"#6B7280",fontSize:12 }}>{row.unit}</td>
                     <td style={{ ...tdStyle,textAlign:"right" }}>
                       <input type="number" min="0" step="1" value={row.qty||""} placeholder="0" onChange={e => setQty(row.id,e.target.value===""?0:Number(e.target.value))} className="qty-input"/>
@@ -786,10 +853,10 @@ function MasterRow({ item, editingMaster, setEditingMaster, updateMasterItem, re
       </td>
       <td style={{ ...tdStyle,textAlign:"center",color:"#6B7280",fontSize:12 }}>{item.unit}</td>
       <td style={{ ...tdStyle,textAlign:"right",fontVariantNumeric:"tabular-nums" }}>
-        {editing ? <input type="number" step="0.01" value={draft.parts} onChange={e => setDraft({...draft,parts:e.target.value})} style={{ ...inputStyle,width:110,textAlign:"right" }}/> : fmtCurrency(item.parts)}
+        {editing ? <input type="number" step="1" value={draft.parts} onChange={e => setDraft({...draft,parts:e.target.value})} style={{ ...inputStyle,width:110,textAlign:"right" }}/> : fmtCurrency(item.parts)}
       </td>
       <td style={{ ...tdStyle,textAlign:"right",fontVariantNumeric:"tabular-nums" }}>
-        {editing ? <input type="number" step="0.01" value={draft.labour} onChange={e => setDraft({...draft,labour:e.target.value})} style={{ ...inputStyle,width:110,textAlign:"right" }}/> : fmtCurrency(item.labour)}
+        {editing ? <input type="number" step="1" value={draft.labour} onChange={e => setDraft({...draft,labour:e.target.value})} style={{ ...inputStyle,width:110,textAlign:"right" }}/> : fmtCurrency(item.labour)}
       </td>
       <td style={{ ...tdStyle,textAlign:"center" }}>
         {editing ? (
@@ -850,8 +917,8 @@ function AddItemModal({ onClose, onAdd }) {
               <option value="t">t (tonne)</option>
             </select>
           </Field>
-          <Field label="Unit Parts ($)"><input type="number" step="0.01" value={form.parts} onChange={e => setForm({...form,parts:Number(e.target.value)})} style={inputStyle}/></Field>
-          <Field label="Unit Labour ($)"><input type="number" step="0.01" value={form.labour} onChange={e => setForm({...form,labour:Number(e.target.value)})} style={inputStyle}/></Field>
+          <Field label="Unit Parts ($)"><input type="number" step="1" value={form.parts} onChange={e => setForm({...form,parts:Number(e.target.value)})} style={inputStyle}/></Field>
+          <Field label="Unit Labour ($)"><input type="number" step="1" value={form.labour} onChange={e => setForm({...form,labour:Number(e.target.value)})} style={inputStyle}/></Field>
         </div>
         <Field label="Note (optional)"><input value={form.note} onChange={e => setForm({...form,note:e.target.value})} style={inputStyle}/></Field>
         <div style={{ display:"flex",gap:8,justifyContent:"flex-end",marginTop:16 }}>
